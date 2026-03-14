@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Browser Terminal</title>
+
+  <!-- xterm.js -->
+  <link
+    rel="stylesheet"
+    href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css"
+  />
+  <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.min.js"></script>
+
+  <style>
+    /* ── Reset & full-screen layout ────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      background: #0d0d0d;
+      overflow: hidden;
+      font-family: 'Cascadia Code', 'Fira Code', 'Menlo', monospace;
+    }
+
+    /* ── Top bar ────────────────────────────────────── */
+    #topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 38px;
+      background: #1a1a2e;
+      padding: 0 16px;
+      border-bottom: 1px solid #2a2a4a;
+      flex-shrink: 0;
+    }
+
+    #topbar .title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: #e0e0ff;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+    }
+
+    #topbar .dot { width: 11px; height: 11px; border-radius: 50%; }
+    .dot-red    { background: #ff5f57; }
+    .dot-yellow { background: #febc2e; }
+    .dot-green  { background: #28c840; }
+
+    #topbar .status {
+      font-size: 11px;
+      padding: 3px 10px;
+      border-radius: 12px;
+      font-weight: 500;
+    }
+    .status-disconnected { background: #3a1a1a; color: #ff6b6b; border: 1px solid #6b2a2a; }
+    .status-connecting   { background: #2a2a1a; color: #ffb347; border: 1px solid #6b5a2a; }
+    .status-connected    { background: #1a3a1a; color: #6bff6b; border: 1px solid #2a6b2a; }
+    .status-timeout      { background: #3a1a2a; color: #ff6baa; border: 1px solid #6b2a4a; }
+
+    /* ── Terminal container ─────────────────────────── */
+    #app {
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      height: 100vh;
+    }
+
+    #terminal-container {
+      flex: 1;
+      overflow: hidden;
+      padding: 4px;
+    }
+
+    /* ── Auth overlay ───────────────────────────────── */
+    #auth-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.85);
+      backdrop-filter: blur(6px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+
+    #auth-box {
+      background: #12121f;
+      border: 1px solid #2a2a50;
+      border-radius: 16px;
+      padding: 40px 48px;
+      width: 380px;
+      box-shadow: 0 24px 80px rgba(0,0,100,0.5);
+      text-align: center;
+    }
+
+    #auth-box h2 {
+      color: #c0c0ff;
+      font-size: 20px;
+      margin-bottom: 6px;
+      letter-spacing: 0.05em;
+    }
+
+    #auth-box p {
+      color: #6060a0;
+      font-size: 13px;
+      margin-bottom: 28px;
+    }
+
+    #auth-box input {
+      width: 100%;
+      padding: 12px 16px;
+      border-radius: 10px;
+      border: 1px solid #3a3a70;
+      background: #0a0a1a;
+      color: #d0d0ff;
+      font-size: 15px;
+      font-family: inherit;
+      outline: none;
+      margin-bottom: 18px;
+      transition: border-color 0.2s;
+    }
+
+    #auth-box input:focus { border-color: #6060ff; }
+
+    #auth-box button {
+      width: 100%;
+      padding: 12px;
+      border-radius: 10px;
+      border: none;
+      background: linear-gradient(135deg, #4040cc, #6060ff);
+      color: #fff;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.2s, transform 0.1s;
+      letter-spacing: 0.03em;
+    }
+
+    #auth-box button:hover  { opacity: 0.9; }
+    #auth-box button:active { transform: scale(0.98); }
+
+    #auth-error {
+      color: #ff6b6b;
+      font-size: 12px;
+      margin-top: 10px;
+      min-height: 16px;
+    }
+
+    /* ── Reconnect banner ───────────────────────────── */
+    #reconnect-banner {
+      display: none;
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #1a1a3a;
+      border: 1px solid #4a4a80;
+      border-radius: 10px;
+      padding: 10px 20px;
+      color: #a0a0ff;
+      font-size: 13px;
+      gap: 12px;
+      align-items: center;
+      z-index: 50;
+      box-shadow: 0 8px 32px rgba(0,0,80,0.5);
+    }
+
+    #reconnect-banner.show { display: flex; }
+
+    #reconnect-banner button {
+      padding: 5px 14px;
+      border-radius: 6px;
+      border: 1px solid #6060ff;
+      background: transparent;
+      color: #8080ff;
+      cursor: pointer;
+      font-size: 12px;
+      transition: background 0.2s;
+    }
+
+    #reconnect-banner button:hover { background: #2a2a60; }
+  </style>
+</head>
+<body>
+
+<!-- ── Auth overlay ───────────────────────────────────────────────────── -->
+<div id="auth-overlay">
+  <div id="auth-box">
+    <h2>🖥 Browser Terminal</h2>
+    <p>Enter your access token to start a session</p>
+    <input
+      id="token-input"
+      type="password"
+      placeholder="Access token"
+      autocomplete="off"
+      autofocus
+    />
+    <button id="connect-btn">Connect</button>
+    <div id="auth-error"></div>
+  </div>
+</div>
+
+<!-- ── Main layout ─────────────────────────────────────────────────────── -->
+<div id="app">
+  <div id="topbar">
+    <div class="title">
+      <span class="dot dot-red"></span>
+      <span class="dot dot-yellow"></span>
+      <span class="dot dot-green"></span>
+      <span style="margin-left:8px">Browser Terminal</span>
+    </div>
+    <span id="status-badge" class="status status-disconnected">● Disconnected</span>
+  </div>
+  <div id="terminal-container"></div>
+</div>
+
+<!-- ── Reconnect banner ────────────────────────────────────────────────── -->
+<div id="reconnect-banner">
+  <span id="reconnect-msg">Connection lost</span>
+  <button id="reconnect-btn">Reconnect</button>
+</div>
+
+<script>
+  // ── Terminal setup ─────────────────────────────────────────────────────────
+  const term = new Terminal({
+    cursorBlink: true,
+    cursorStyle: 'block',
+    fontSize: 14,
+    fontFamily: "'Cascadia Code', 'Fira Code', 'Menlo', 'Courier New', monospace",
+    theme: {
+      background:  '#0d0d13',
+      foreground:  '#d4d4f5',
+      cursor:      '#7070ff',
+      cursorAccent:'#0d0d13',
+      black:       '#1a1a2a',
+      red:         '#ff6b6b',
+      green:       '#69ff94',
+      yellow:      '#ffe66d',
+      blue:        '#6ec6ff',
+      magenta:     '#d18dff',
+      cyan:        '#66fff9',
+      white:       '#d4d4f5',
+      brightBlack: '#404060',
+      brightRed:   '#ff8080',
+      brightGreen: '#80ffaa',
+      brightYellow:'#ffee80',
+      brightBlue:  '#80d4ff',
+      brightMagenta:'#e0a0ff',
+      brightCyan:  '#80fff0',
+      brightWhite: '#ffffff',
+    },
+    allowTransparency: false,
+    scrollback: 5000,
+    convertEol: false,
+  });
+
+  const fitAddon      = new FitAddon.FitAddon();
+  const webLinksAddon = new WebLinksAddon.WebLinksAddon();
+  term.loadAddon(fitAddon);
+  term.loadAddon(webLinksAddon);
+  term.open(document.getElementById('terminal-container'));
+  fitAddon.fit();
+
+  // ── State ──────────────────────────────────────────────────────────────────
+  let ws        = null;
+  let token     = '';
+  let connected = false;
+
+  const statusBadge    = document.getElementById('status-badge');
+  const reconnectBanner= document.getElementById('reconnect-banner');
+  const reconnectMsg   = document.getElementById('reconnect-msg');
+  const authOverlay    = document.getElementById('auth-overlay');
+
+  function setStatus(state) {
+    const map = {
+      disconnected: ['status-disconnected', '● Disconnected'],
+      connecting:   ['status-connecting',   '◌ Connecting…'],
+      connected:    ['status-connected',    '● Connected'],
+      timeout:      ['status-timeout',      '⏱ Timed Out'],
+    };
+    statusBadge.className = 'status ' + map[state][0];
+    statusBadge.textContent = map[state][1];
+  }
+
+  // ── WebSocket connection ───────────────────────────────────────────────────
+  function connectWS(tok) {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    const host  = location.host || 'localhost:8000';
+    const url   = `${proto}://${host}/ws?token=${encodeURIComponent(tok)}`;
+
+    setStatus('connecting');
+    ws = new WebSocket(url);
+    ws.binaryType = 'arraybuffer';
+
+    ws.onopen = () => {
+      connected = true;
+      setStatus('connected');
+      reconnectBanner.classList.remove('show');
+      // Send initial terminal size
+      sendResize();
+      term.focus();
+    };
+
+    ws.onmessage = (event) => {
+      if (event.data instanceof ArrayBuffer) {
+        const bytes = new Uint8Array(event.data);
+        term.write(bytes);
+      } else {
+        term.write(event.data);
+      }
+    };
+
+    ws.onclose = (event) => {
+      connected = false;
+      if (event.code === 4001) {
+        // Auth failed
+        setStatus('disconnected');
+        document.getElementById('auth-error').textContent = 'Invalid token — access denied.';
+        authOverlay.style.display = 'flex';
+        return;
+      }
+      if (event.code === 4002) {
+        setStatus('timeout');
+        reconnectMsg.textContent = 'Session timed out due to inactivity';
+      } else {
+        setStatus('disconnected');
+        reconnectMsg.textContent = event.reason || 'Connection closed';
+      }
+      reconnectBanner.classList.add('show');
+    };
+
+    ws.onerror = () => {
+      // onclose will follow; just log
+      setStatus('disconnected');
+    };
+  }
+
+  // ── Input → WebSocket ─────────────────────────────────────────────────────
+  term.onData((data) => {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(data);
+    }
+  });
+
+  // ── Resize ─────────────────────────────────────────────────────────────────
+  function sendResize() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: 'resize',
+        cols: term.cols,
+        rows: term.rows,
+      }));
+    }
+  }
+
+  const resizeObs = new ResizeObserver(() => {
+    fitAddon.fit();
+    sendResize();
+  });
+  resizeObs.observe(document.getElementById('terminal-container'));
+
+  window.addEventListener('resize', () => {
+    fitAddon.fit();
+    sendResize();
+  });
+
+  // ── Auth form ──────────────────────────────────────────────────────────────
+  function handleConnect() {
+    const val = document.getElementById('token-input').value.trim();
+    if (!val) {
+      document.getElementById('auth-error').textContent = 'Please enter your access token.';
+      return;
+    }
+    document.getElementById('auth-error').textContent = '';
+    token = val;
+    authOverlay.style.display = 'none';
+    connectWS(token);
+  }
+
+  document.getElementById('connect-btn').addEventListener('click', handleConnect);
+  document.getElementById('token-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') handleConnect();
+  });
+
+  // ── Reconnect button ───────────────────────────────────────────────────────
+  document.getElementById('reconnect-btn').addEventListener('click', () => {
+    reconnectBanner.classList.remove('show');
+    term.clear();
+    connectWS(token);
+  });
+</script>
+</body>
+</html>
